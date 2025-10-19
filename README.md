@@ -25,7 +25,8 @@ pip install -r requirements.txt
 pip freeze > requirements.txt
 ```
 
-## 5. Make folder called models at the root of repository and insert the files downloaded from the link (https://drive.google.com/drive/folders/1uWs1QxCHI5M8N5F8j4dIPBJi3lyQkk-0?usp=drive_link) into this models folder
+
+### 5. Make folder called models at the root of repository and insert the files downloaded from the link (https://drive.google.com/drive/folders/1uWs1QxCHI5M8N5F8j4dIPBJi3lyQkk-0?usp=drive_link) into this models folder
 
 
 ## 6. Run the Application:
