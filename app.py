@@ -28,6 +28,23 @@ def allowed_file(filename: str) -> bool:
     ext = filename.rsplit(".", 1)[1].lower()
     return ext in ALLOWED_EXT
 
+@app.route("/", methods=["GET"])
+def index():
+        """
+        Root route - simple service info / quick usage help.
+        """
+        return jsonify({
+            "service": "Aqua Sentinel Backend",
+            "description": "Upload two images (ship and debris) to /api/detect as multipart/form-data.",
+            "endpoints": { 
+                "detect": {
+                    "path": "/api/detect",
+                    "method": "POST",
+                    "fields": ["ship", "debris"]
+                }
+            }
+        })
+
 
 @app.route("/api/detect", methods=["POST"])
 def detect_route():
