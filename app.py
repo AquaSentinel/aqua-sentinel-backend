@@ -5,6 +5,7 @@ import zipfile
 from typing import List
 
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from PIL import Image
 
 # Import inference modules (they are designed to lazy-load models)
@@ -12,11 +13,13 @@ from inference import ship as ship_infer
 from inference import debris as debris_infer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, "models")
+# Models are in the root directory, not in a models subdirectory
+MODEL_DIR = BASE_DIR
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "bmp", "tif", "tiff"}
 
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
 def allowed_file(filename: str) -> bool:
@@ -26,7 +29,7 @@ def allowed_file(filename: str) -> bool:
     return ext in ALLOWED_EXT
 
 
-@app.route("/detect", methods=["POST"])
+@app.route("/api/detect", methods=["POST"])
 def detect_route():
     """
     Accepts multipart/form-data with two files:
@@ -83,12 +86,12 @@ def detect_route():
     memory_file = io.BytesIO()
     with zipfile.ZipFile(memory_file, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         b = io.BytesIO()
-        ship_out_img.save(b, format="JPEG")
-        zf.writestr("ship_output.jpg", b.getvalue())
+        ship_out_img.save(b, format="PNG")
+        zf.writestr("ship-result.png", b.getvalue())
 
         b2 = io.BytesIO()
-        debris_out_img.save(b2, format="JPEG")
-        zf.writestr("debris_output.jpg", b2.getvalue())
+        debris_out_img.save(b2, format="PNG")
+        zf.writestr("debris-result.png", b2.getvalue())
 
     memory_file.seek(0)
     return send_file(memory_file, mimetype="application/zip", as_attachment=True, download_name="detections.zip")
@@ -96,4 +99,4 @@ def detect_route():
 
 if __name__ == "__main__":
     # For local dev
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5050, debug=True)
