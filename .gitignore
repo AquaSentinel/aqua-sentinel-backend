@@ -1,6 +1,6 @@
 venv
 *.onnx
-.ipynb_checkpoints/
 models/
 inference/__pycache__/
 backup.py
+.ipynb_checkpoints/
