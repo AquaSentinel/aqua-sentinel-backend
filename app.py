@@ -6,6 +6,8 @@ from typing import List
 
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import firebase_admin
+from firebase_admin import credentials, auth
 from PIL import Image
 
 # Import inference modules (they are designed to lazy-load models)
@@ -20,6 +22,10 @@ ALLOWED_EXT = {"png", "jpg", "jpeg", "bmp", "tif", "tiff"}
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# Initialize Firebase Admin SDK
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
 
 
 def allowed_file(filename: str) -> bool:
@@ -44,6 +50,31 @@ def index():
                 }
             }
         })
+
+@app.route("/api/signup", methods=["POST"])
+def signup():
+    # Check for authorization header
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"error": "Missing Authorization header"}), 401
+
+    token = auth_header.split(" ")[1]  # Extract token from "Bearer <token>"
+    try:
+        decoded_token = auth.verify_id_token(token)
+        user_email = decoded_token.get("email")
+        user_name = decoded_token.get("name")
+        user_picture = decoded_token.get("picture")
+
+        # For now, just return info — later you can store this in a DB
+        return jsonify({
+            "message": f"Welcome {user_name or user_email}!",
+            "email": user_email,
+            "name": user_name,
+            "picture": user_picture
+        })
+    except Exception as e:
+        print("Error verifying token:", str(e))
+        return jsonify({"error": "Invalid or expired token"}), 401
 
 
 @app.route("/api/detect", methods=["POST"])

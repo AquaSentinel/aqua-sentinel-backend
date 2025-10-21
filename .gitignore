@@ -4,3 +4,4 @@ models/
 inference/__pycache__/
 backup.py
 .ipynb_checkpoints/
+serviceAccountKey.json
