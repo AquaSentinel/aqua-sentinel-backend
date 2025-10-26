@@ -146,6 +146,22 @@ def run_ship(image_bytes: bytes, model_path: str = None) -> bytes:
         draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
         draw.text((x1 + 2, y1 - 12), f"{conf:.2f}", fill="red")
 
+    # Diagnostic logging: how many detections?
+    # try:
+    #     det_count = len(boxes) if boxes is not None else 0
+    # except Exception:
+    #     det_count = 0
+    # print(f"[ship_infer] detections={det_count}")
+
+    # # If debug env var is set, save a copy to cwd for inspection
+    # try:
+    #     if os.environ.get("AQS_DEBUG_DETECTIONS") == "1":
+    #         dbg_path = os.path.join(os.getcwd(), "ship_out_debug.png")
+    #         out_pil.save(dbg_path)
+    #         print(f"[ship_infer] saved debug image: {dbg_path}")
+    # except Exception as e:
+    #     print("[ship_infer] failed to write debug image:", e)
+
     buf = io.BytesIO()
     out_pil.save(buf, format="PNG")
     return buf.getvalue()
