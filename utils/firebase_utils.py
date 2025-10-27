@@ -7,7 +7,7 @@ from firebase_admin import credentials, firestore, storage
 # Load .env
 load_dotenv()
 
-cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+cred_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'serviceAccountKey.json')
 
 # Initialize Firebase app only once
 if not firebase_admin._apps:

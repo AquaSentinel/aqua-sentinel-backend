@@ -24,7 +24,16 @@ def send_mail_with_attachment(
     to_addr: str = None
 ):
     """Send an HTML email (optionally with attachment)."""
+    # Validate SMTP config
+    pairs = [("MAIL_FROM", MAIL_FROM), ("MAIL_USER", MAIL_USER), ("MAIL_PASS", MAIL_PASS)]
+    missing = [name for name, val in pairs if not val]
+    if missing:
+        raise RuntimeError(f"Missing mail configuration: {missing}")
+
     to_addr = to_addr or MAIL_TO
+    if not to_addr:
+        raise RuntimeError("No recipient address configured or provided")
+
     msg = MIMEMultipart()
     msg["From"] = MAIL_FROM
     msg["To"] = to_addr
