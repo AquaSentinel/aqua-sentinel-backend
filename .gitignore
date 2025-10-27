@@ -1,7 +1,8 @@
 venv
 *.onnx
 models/
-inference/__pycache__/
 backup.py
 .ipynb_checkpoints/
 serviceAccountKey.json
+.env
+__pycache__

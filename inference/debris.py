@@ -189,6 +189,25 @@ def detect_image(pil_image: Image.Image, model_path: str = None) -> Image.Image:
 
     # Postprocess outputs normally
     boxes, scores = _postprocess(outputs, orig_shape, resize_size=IMAGE_SIZE)
+
+    # Diagnostic logging + optional debug save
+    # try:
+    #     det_count = 0 if boxes is None or boxes.size == 0 else len(boxes)
+    # except Exception:
+    #     det_count = 0
+    # print(f"[debris_infer] detections={det_count}")
+
+    # if os.environ.get("AQS_DEBUG_DETECTIONS") == "1":
+    #     try:
+    #         out_img = pil_image.copy()
+    #         if det_count > 0:
+    #             out_img = _draw_boxes(out_img, boxes, scores)
+    #         dbg_path = os.path.join(os.getcwd(), "debris_out_debug.png")
+    #         out_img.save(dbg_path)
+    #         print(f"[debris_infer] saved debug image: {dbg_path}")
+    #     except Exception as e:
+    #         print("[debris_infer] failed to write debug image:", e)
+
     if boxes.size == 0:
         return pil_image
     return _draw_boxes(pil_image.copy(), boxes, scores)
