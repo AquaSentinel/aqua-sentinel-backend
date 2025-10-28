@@ -196,13 +196,22 @@ def receive_report():
         print(f"User ID  : {user_id}")
 
         # ─────────────────────────────────────────────
-        #  Fetch latest record (4 image URLs) from Firestore
-        records_ref = db.collection("users").document(user_id).collection("records")
-        docs = list(records_ref.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(1).stream())
-        if not docs:
-            raise ValueError("No records found for this user.")
+        #  Fetch requested record (recordId) or latest record (4 image URLs) from Firestore
+        if not user_id:
+            raise ValueError("Missing userId in report request")
 
-        record = docs[0].to_dict()
+        records_ref = db.collection("users").document(user_id).collection("records")
+        record_id = request.form.get("recordId")
+        if record_id:
+            doc = records_ref.document(record_id).get()
+            if not doc.exists:
+                raise ValueError(f"Requested recordId '{record_id}' not found for user {user_id}")
+            record = doc.to_dict()
+        else:
+            docs = list(records_ref.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(1).stream())
+            if not docs:
+                raise ValueError("No records found for this user.")
+            record = docs[0].to_dict()
         urls = record.get("images", [])
         if len(urls) < 4:
             raise ValueError("Latest record does not have 4 images.")
