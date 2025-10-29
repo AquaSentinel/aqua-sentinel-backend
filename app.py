@@ -7,16 +7,13 @@ from typing import List
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import firebase_admin
-from firebase_admin import credentials, auth , firestore
+from firebase_admin import credentials, auth
 from PIL import Image
-import requests
+
 # Import inference modules (they are designed to lazy-load models)
 from inference import ship as ship_infer
 from inference import debris as debris_infer
-from utils.firebase_utils import db
 
-# Import email util
-from utils.email_utils import send_mail_with_attachment
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Models are in the root directory, not in a models subdirectory
 MODEL_DIR = BASE_DIR
@@ -26,6 +23,9 @@ ALLOWED_EXT = {"png", "jpg", "jpeg", "bmp", "tif", "tiff"}
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
+# Initialize Firebase Admin SDK
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
 
 
 def allowed_file(filename: str) -> bool:
@@ -179,80 +179,6 @@ def detect_route():
     memory_file.seek(0)
     return send_file(memory_file, mimetype="application/zip", as_attachment=True, download_name="detections.zip")
 
-@app.route("/api/report", methods=["POST"])
-def receive_report():
-    try:
-        vessel   = request.form.get("vessel")
-        location = request.form.get("location")
-        email    = request.form.get("email")
-        toEmail = request.form.get("toEmail")
-        notes    = request.form.get("notes")
-        user_id  = request.form.get("userId")  # comes from frontend (auth.currentUser.uid)
-
-        print("=== Received Report ===")
-        print(f"Vessel   : {vessel}")
-        print(f"Location : {location}")
-        print(f"Email    : {email}")
-        print(f"toEmail  : {toEmail}")
-        print(f"Notes    : {notes}")
-        print(f"User ID  : {user_id}")
-        
-
-        # ─────────────────────────────────────────────
-        #  Fetch requested record (recordId) or latest record (4 image URLs) from Firestore
-        if not user_id:
-            raise ValueError("Missing userId in report request")
-
-        records_ref = db.collection("users").document(user_id).collection("records")
-        record_id = request.form.get("recordId")
-        if record_id:
-            doc = records_ref.document(record_id).get()
-            if not doc.exists:
-                raise ValueError(f"Requested recordId '{record_id}' not found for user {user_id}")
-            record = doc.to_dict()
-        else:
-            docs = list(records_ref.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(1).stream())
-            if not docs:
-                raise ValueError("No records found for this user.")
-            record = docs[0].to_dict()
-        urls = record.get("images", [])
-        if len(urls) < 4:
-            raise ValueError("Latest record does not have 4 images.")
-
-        # 🔹 Download each image URL and put into ZIP (in-memory)
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-            for i, url in enumerate(urls):
-                r = requests.get(url, timeout=30)
-                r.raise_for_status()
-                z.writestr(f"image_{i+1}.png", r.content)
-        zip_buffer.seek(0)
-        zip_bytes = zip_buffer.read()
-
-        # 🔹 Email content
-        subject = f"Aqua Sentinel Report — {vessel or 'Unknown Vessel'}"
-        body = f"""
-        <h3>Aqua Sentinel Report</h3>
-        <p><b>Vessel:</b> {vessel}<br>
-           <b>Location:</b> {location}<br>
-           <b>Email:</b> {email}<br>
-           <b>Notes:</b> {notes}</p>
-        """
-
-        # 🔹 Send email with the ZIP attachment
-        send_mail_with_attachment(
-            subject=subject,
-            toEmail=toEmail,
-            html_body=body,
-            attachment_name="aqua-report.zip",
-            attachment_bytes=zip_bytes
-        )
-
-        return jsonify({"message": "Report received successfully"}), 200
-
-    except Exception as e:
-        print("Error while processing report:", e)
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     # For local dev
