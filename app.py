@@ -185,6 +185,7 @@ def receive_report():
         vessel   = request.form.get("vessel")
         location = request.form.get("location")
         email    = request.form.get("email")
+        toEmail = request.form.get("toEmail")
         notes    = request.form.get("notes")
         user_id  = request.form.get("userId")  # comes from frontend (auth.currentUser.uid)
 
@@ -192,8 +193,10 @@ def receive_report():
         print(f"Vessel   : {vessel}")
         print(f"Location : {location}")
         print(f"Email    : {email}")
+        print(f"toEmail  : {toEmail}")
         print(f"Notes    : {notes}")
         print(f"User ID  : {user_id}")
+        
 
         # ─────────────────────────────────────────────
         #  Fetch requested record (recordId) or latest record (4 image URLs) from Firestore
@@ -216,7 +219,6 @@ def receive_report():
         if len(urls) < 4:
             raise ValueError("Latest record does not have 4 images.")
 
-        # ─────────────────────────────────────────────
         # 🔹 Download each image URL and put into ZIP (in-memory)
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -226,7 +228,6 @@ def receive_report():
                 z.writestr(f"image_{i+1}.png", r.content)
         zip_buffer.seek(0)
         zip_bytes = zip_buffer.read()
-        # ─────────────────────────────────────────────
 
         # 🔹 Email content
         subject = f"Aqua Sentinel Report — {vessel or 'Unknown Vessel'}"
@@ -241,6 +242,7 @@ def receive_report():
         # 🔹 Send email with the ZIP attachment
         send_mail_with_attachment(
             subject=subject,
+            toEmail=toEmail,
             html_body=body,
             attachment_name="aqua-report.zip",
             attachment_bytes=zip_bytes

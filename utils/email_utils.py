@@ -10,7 +10,6 @@ import os
 load_dotenv()
 
 MAIL_FROM = os.getenv("MAIL_FROM")
-MAIL_TO   = os.getenv("MAIL_TO")
 MAIL_HOST = os.getenv("MAIL_HOST", "smtp.gmail.com")
 MAIL_PORT = int(os.getenv("MAIL_PORT", "465"))
 MAIL_USER = os.getenv("MAIL_USER")
@@ -18,6 +17,7 @@ MAIL_PASS = os.getenv("MAIL_PASS")
 
 def send_mail_with_attachment(
     subject: str,
+    toEmail: str,
     html_body: str,
     attachment_name: str = None,
     attachment_bytes: bytes = None,
@@ -30,7 +30,7 @@ def send_mail_with_attachment(
     if missing:
         raise RuntimeError(f"Missing mail configuration: {missing}")
 
-    to_addr = to_addr or MAIL_TO
+    to_addr = toEmail
     if not to_addr:
         raise RuntimeError("No recipient address configured or provided")
 
