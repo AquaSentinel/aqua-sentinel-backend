@@ -18,7 +18,7 @@ _input_meta = None
 # defaults
 IMAGE_SIZE = (256, 256)  # (W, H)
 CONF_THRESHOLD = 0.55
-NMS_IOU = 0.4
+NMS_IOU = 0.2
 CLASS_NAME = "debris"
 
 

@@ -1,22 +1,28 @@
-# Set up the base image 
-FROM python:3.12-slim
+FROM python:3.11-slim
 
-# Set the working directory inside the container
+# Disable .pyc & force unbuffered logs
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# System libs for ONNX, Pillow, OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libsm6 libxrender1 libxext6 libgl1 libgomp1 \
+    curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Workdir
 WORKDIR /app
 
-# Copy the requirements file and install dependencies
+# Install Python deps
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Copy code + models
 COPY . .
 
-# Expose the port your Flask app runs on
-EXPOSE 5000
+# Expose port
+EXPOSE 8000
 
-# Set environment variable for Flask
-ENV FLASK_APP=server.py
-ENV FLASK_RUN_HOST=0.0.0.0
-
-# Command to run the Flask server
-CMD ["flask", "run"]
+# Run directly (good for testing)
+CMD ["python", "app.py"]

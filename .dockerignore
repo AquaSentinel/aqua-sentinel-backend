@@ -1,0 +1,49 @@
+# .dockerignore
+
+# Ignore git and version control
+.git
+.gitignore
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info
+*.egg
+
+# Byte-compiled and build artifacts
+build/
+dist/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+
+# IDE/editor stuff
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+.DS_Store
+
+
+# Credentials or local env
+.env
+
+# Other temp files 
+inference/images
+inference-ipynb/
+training
+backup.py
+README.md 
