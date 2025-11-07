@@ -54,3 +54,4 @@ def send_mail_with_attachment(
         server.sendmail(MAIL_FROM, [to_addr], msg.as_string())
 
     print(f" Email sent to {to_addr} with subject: {subject}")
+

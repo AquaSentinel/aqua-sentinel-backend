@@ -192,6 +192,18 @@ def receive_report():
         toEmail = request.form.get("toEmail")
         notes    = request.form.get("notes")
         user_id  = request.form.get("userId")  # comes from frontend (auth.currentUser.uid)
+        # If the client provided an Authorization header with an ID token, verify it and use the server-verified uid.
+        auth_header = request.headers.get("Authorization")
+        if auth_header:
+            try:
+                token = auth_header.split(" ")[1]
+                decoded = auth.verify_id_token(token)
+                server_uid = decoded.get("uid")
+                if server_uid:
+                    user_id = server_uid
+                    print(f"[receive_report] authenticated request for uid={user_id}")
+            except Exception as e:
+                print("[receive_report] failed to verify id token:", e)
 
         print("=== Received Report ===")
         print(f"Vessel   : {vessel}")
@@ -202,34 +214,64 @@ def receive_report():
         print(f"User ID  : {user_id}")
         
 
-        # ─────────────────────────────────────────────
-        #  Fetch requested record (recordId) or latest record (4 image URLs) from Firestore
-        if not user_id:
-            raise ValueError("Missing userId in report request")
+        #  Use uploaded files if provided (e.g. stitched image), otherwise
+        #  fetch requested record (recordId) or latest record (4 image URLs) from Firestore.
+        uploaded_files = list(request.files.items())
 
-        records_ref = db.collection("users").document(user_id).collection("records")
-        record_id = request.form.get("recordId")
-        if record_id:
-            doc = records_ref.document(record_id).get()
-            if not doc.exists:
-                raise ValueError(f"Requested recordId '{record_id}' not found for user {user_id}")
-            record = doc.to_dict()
-        else:
-            docs = list(records_ref.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(1).stream())
-            if not docs:
-                raise ValueError("No records found for this user.")
-            record = docs[0].to_dict()
-        urls = record.get("images", [])
-        if len(urls) < 4:
-            raise ValueError("Latest record does not have 4 images.")
-
-        # 🔹 Download each image URL and put into ZIP (in-memory)
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-            for i, url in enumerate(urls):
-                r = requests.get(url, timeout=30)
-                r.raise_for_status()
-                z.writestr(f"image_{i+1}.png", r.content)
+            # Package any uploaded files first (these are authoritative for this request)
+            uploaded_map = {k: v for k, v in uploaded_files}
+            for idx, (fieldname, fobj) in enumerate(uploaded_map.items()):
+                try:
+                    content = fobj.read()
+                    # Use the client-provided filename when available; otherwise fall back to a predictable name
+                    fname = fobj.filename or f"uploaded_{idx+1}.png"
+                    z.writestr(fname, content)
+                except Exception as e:
+                    print(f"Warning: failed to read uploaded file {fieldname}:", e)
+
+            # If result images (shipResult/debrisResult) were NOT uploaded, but we have a verified user_id,
+            # try to fetch them from the user's latest (or requested) Firestore record so older workflow still works.
+            need_ship_result = "shipResult" not in uploaded_map and "ship_result" not in uploaded_map
+            need_debris_result = "debrisResult" not in uploaded_map and "debris_result" not in uploaded_map
+
+            if (need_ship_result or need_debris_result):
+                # If we don't have a server-verified user_id, we cannot fetch records.
+                if not user_id:
+                    # nothing more to do
+                    pass
+                else:
+                    records_ref = db.collection("users").document(user_id).collection("records")
+                    record_id = request.form.get("recordId")
+                    if record_id:
+                        doc = records_ref.document(record_id).get()
+                        if not doc.exists:
+                            print(f"Requested recordId '{record_id}' not found for user {user_id}")
+                            record = None
+                        else:
+                            record = doc.to_dict()
+                    else:
+                        docs = list(records_ref.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(1).stream())
+                        record = docs[0].to_dict() if docs else None
+
+                    if record:
+                        urls = record.get("images", [])
+                        # Expecting [ship-original, debris-original, ship-result, debris-result]
+                        if len(urls) >= 4:
+                            try:
+                                # Only fetch and write missing result images
+                                if need_ship_result:
+                                    r = requests.get(urls[2], timeout=30)
+                                    r.raise_for_status()
+                                    z.writestr("ship-result.png", r.content)
+                                if need_debris_result:
+                                    r2 = requests.get(urls[3], timeout=30)
+                                    r2.raise_for_status()
+                                    z.writestr("debris-result.png", r2.content)
+                            except Exception as e:
+                                print("Warning: failed to download record result images:", e)
+
         zip_buffer.seek(0)
         zip_bytes = zip_buffer.read()
 
