@@ -7,6 +7,8 @@ from typing import Dict, Any
 from PIL import Image
 from tqdm import tqdm
 from utils.email_utils import send_mail_with_attachment
+import io
+import zipfile
 
 # Import the inference modules
 from inference import ship
@@ -259,22 +261,23 @@ def process_satellite_timestamp(
 
 def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     """
-    Sends an email to jainprinci00@gmail.com if both ship and debris are detected
-    in any of the 16 patches. Attaches the detected images and includes coordinates.
+    Sends a single email to jainprinci00@gmail.com with one ZIP file attached
+    containing all ship and debris annotated images for alert patches.
+    Includes HTML summary of coordinates and patch IDs.
     """
     recipient = "jainprinci00@gmail.com"
 
     if not alerts:
-        print("No alerts found — no email will be sent.")
+        print("No alerts found — no email sent.")
         return
 
-    # Build HTML email body
+    # Build HTML summary body
     html_body = f"""
     <html>
     <body>
-        <h2>🚨 Marine Alert Report</h2>
+        <h2>Marine Alert Report</h2>
         <p>Timestamp: <b>{timestamp}</b></p>
-        <p>The following patches have both <b>ship</b> and <b>debris</b> detections:</p>
+        <p>The following patches show both ship and debris detections:</p>
         <table border="1" cellspacing="0" cellpadding="5">
             <tr>
                 <th>Patch ID</th>
@@ -294,39 +297,43 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
 
     html_body += """
         </table>
-        <p>See attached images for visual verification.</p>
+        <p>All annotated detection images are attached in the ZIP file.</p>
     </body>
     </html>
     """
 
-    # Attach all alert images (ship + debris pairs)
-    for alert in alerts:
-        patch_id = alert["patch_id"]
+    # Prepare ZIP in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for alert in alerts:
+            patch_info = next(
+                (p for p in patch_data if p["patch_id"] == alert["patch_id"]), None
+            )
+            if not patch_info:
+                continue
 
-        # Get patch info from patch_data
-        patch_info = next((p for p in patch_data if p["patch_id"] == patch_id), None)
-        if not patch_info:
-            continue
+            for label in ["ship", "debris"]:
+                img_path = patch_info["processed_images"][label]
+                if not os.path.exists(img_path):
+                    continue
+                try:
+                    zip_file.write(img_path, arcname=f"{alert['patch_id']}_{label}.jpg")
+                except Exception as e:
+                    print(f"Failed to add {label} image for {alert['patch_id']}: {e}")
 
-        ship_path = patch_info["processed_images"]["ship"]
-        debris_path = patch_info["processed_images"]["debris"]
+    # Finalize ZIP
+    zip_buffer.seek(0)
 
-        # Send individual email per alert (optional: batch in one email)
-        for image_path, label in [(ship_path, "ship"), (debris_path, "debris")]:
-            try:
-                with open(image_path, "rb") as img_file:
-                    attachment_bytes = img_file.read()
-
-                subject = f"[Marine Alert] {label.capitalize()} + Debris Detected ({patch_id})"
-
-                send_mail_with_attachment(
-                    subject=subject,
-                    toEmail=recipient,
-                    html_body=html_body,
-                    attachment_name=os.path.basename(image_path),
-                    attachment_bytes=attachment_bytes,
-                )
-            except Exception as e:
-                print(f"❌ Failed to send {label} image for {patch_id}: {e}")
-
-    print(f"✅ Email alerts sent to {recipient} for {len(alerts)} patches.")
+    # Send email
+    subject = f"[Marine Alert] Ship + Debris Detections ({timestamp})"
+    try:
+        send_mail_with_attachment(
+            subject=subject,
+            toEmail=recipient,
+            html_body=html_body,
+            attachment_name=f"marine_alerts_{timestamp}.zip",
+            attachment_bytes=zip_buffer.read(),
+        )
+        print(f"Email with ZIP attachment sent to {recipient}")
+    except Exception as e:
+        print(f"Email sending failed: {e}")
