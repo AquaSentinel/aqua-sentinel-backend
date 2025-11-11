@@ -6,6 +6,7 @@ import time
 from typing import Dict, Any
 from PIL import Image
 from tqdm import tqdm
+from utils.email_utils import send_mail_with_attachment
 
 # Import the inference modules
 from inference import ship
@@ -227,6 +228,9 @@ def process_satellite_timestamp(
         # Force garbage collection to free memory
         gc.collect()
 
+        if alerts:
+            send_detection_report_email(timestamp, patch_data, alerts)
+
         return {
             "timestamp": timestamp,
             "processing_time": processing_time,
@@ -250,3 +254,79 @@ def process_satellite_timestamp(
         # Force garbage collection on error too
         gc.collect()
         raise
+# --- Email Reporting Function ---
+
+
+def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
+    """
+    Sends an email to jainprinci00@gmail.com if both ship and debris are detected
+    in any of the 16 patches. Attaches the detected images and includes coordinates.
+    """
+    recipient = "jainprinci00@gmail.com"
+
+    if not alerts:
+        print("No alerts found — no email will be sent.")
+        return
+
+    # Build HTML email body
+    html_body = f"""
+    <html>
+    <body>
+        <h2>🚨 Marine Alert Report</h2>
+        <p>Timestamp: <b>{timestamp}</b></p>
+        <p>The following patches have both <b>ship</b> and <b>debris</b> detections:</p>
+        <table border="1" cellspacing="0" cellpadding="5">
+            <tr>
+                <th>Patch ID</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+            </tr>
+    """
+
+    for alert in alerts:
+        html_body += f"""
+            <tr>
+                <td>{alert['patch_id']}</td>
+                <td>{alert['coordinates']['latitude']}</td>
+                <td>{alert['coordinates']['longitude']}</td>
+            </tr>
+        """
+
+    html_body += """
+        </table>
+        <p>See attached images for visual verification.</p>
+    </body>
+    </html>
+    """
+
+    # Attach all alert images (ship + debris pairs)
+    for alert in alerts:
+        patch_id = alert["patch_id"]
+
+        # Get patch info from patch_data
+        patch_info = next((p for p in patch_data if p["patch_id"] == patch_id), None)
+        if not patch_info:
+            continue
+
+        ship_path = patch_info["processed_images"]["ship"]
+        debris_path = patch_info["processed_images"]["debris"]
+
+        # Send individual email per alert (optional: batch in one email)
+        for image_path, label in [(ship_path, "ship"), (debris_path, "debris")]:
+            try:
+                with open(image_path, "rb") as img_file:
+                    attachment_bytes = img_file.read()
+
+                subject = f"[Marine Alert] {label.capitalize()} + Debris Detected ({patch_id})"
+
+                send_mail_with_attachment(
+                    subject=subject,
+                    toEmail=recipient,
+                    html_body=html_body,
+                    attachment_name=os.path.basename(image_path),
+                    attachment_bytes=attachment_bytes,
+                )
+            except Exception as e:
+                print(f"❌ Failed to send {label} image for {patch_id}: {e}")
+
+    print(f"✅ Email alerts sent to {recipient} for {len(alerts)} patches.")
