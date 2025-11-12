@@ -6,3 +6,4 @@ backup.py
 serviceAccountKey.json
 .env
 __pycache__
+images/processed/

@@ -10,7 +10,7 @@ from utils.inference_utils import (
 
 # --- Config ---
 TARGET_SIZE = 640
-CONF_THRESHOLD = 0.6
+CONF_THRESHOLD = 0.4
 NMS_THRESHOLD = 0.45
 DEFAULT_MODEL = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "models", "ship_detection.onnx")
