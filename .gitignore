@@ -7,3 +7,4 @@ serviceAccountKey.json
 .env
 __pycache__
 images/processed/
+/debris_state/

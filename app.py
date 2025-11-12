@@ -344,14 +344,16 @@ def process_timestamp_route(timestamp):
         base_lat = request.args.get("baseLat", type=float)
         base_lon = request.args.get("baseLon", type=float)
 
-        result = process_satellite_timestamp(timestamp, base_lat, base_lon)
+        # Check if this is the initial timestamp (defaults to false)
+        is_initial = request.args.get("isInitial", "false").lower() == "true"
+
+        result = process_satellite_timestamp(timestamp, base_lat, base_lon, is_initial)
         return jsonify(result), 200
     except FileNotFoundError as e:
         return jsonify({"error": f"Directory not found: {str(e)}"}), 404
     except Exception as e:
         print(f"Error processing timestamp {timestamp}: {str(e)}")
         return jsonify({"error": "Processing failed"}), 500
-
 
 @app.route("/api/view/<timestamp>/<model_type>/<lat>/<lon>")
 def serve_single_grid_image(timestamp, model_type, lat, lon):

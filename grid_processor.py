@@ -3,6 +3,7 @@ import os
 import gc
 import glob
 import time
+import json
 from typing import Dict, Any
 from PIL import Image
 from tqdm import tqdm
@@ -19,6 +20,9 @@ from inference import debris
 BASE_LAT, BASE_LON = 15.01, 85.01  # Bay of Bengal (offset to avoid .0 endings)
 LAT_STEP = 0.017297  # ~1.92km spacing
 LON_STEP = 0.017297  # ~1.92km spacing
+
+# Debris state tracking configuration
+DEBRIS_STATE_DIR = "debris_state"
 
 
 def generate_satellite_coordinates(base_lat=None, base_lon=None):
@@ -59,8 +63,61 @@ def generate_satellite_coordinates(base_lat=None, base_lon=None):
     return coordinates
 
 
+def load_debris_state_matrix(base_lat: float, base_lon: float) -> list:
+    """
+    Load the previous debris state matrix from file.
+    Returns a 4x4 matrix (list of lists) where True = debris detected, False = no debris
+    """
+    os.makedirs(DEBRIS_STATE_DIR, exist_ok=True)
+    state_file = os.path.join(
+        DEBRIS_STATE_DIR, f"debris_state_{base_lat}_{base_lon}.json"
+    )
+
+    if not os.path.exists(state_file):
+        # Initialize with all False (no debris detected initially)
+        return [[False for _ in range(4)] for _ in range(4)]
+
+    try:
+        with open(state_file, "r") as f:
+            data = json.load(f)
+            return data.get(
+                "debris_matrix", [[False for _ in range(4)] for _ in range(4)]
+            )
+    except (json.JSONDecodeError, FileNotFoundError) as e:
+        print(f"Error loading debris state matrix: {e}")
+        return [[False for _ in range(4)] for _ in range(4)]
+
+
+def save_debris_state_matrix(
+    base_lat: float, base_lon: float, debris_matrix: list, timestamp: str
+):
+    """
+    Save the current debris state matrix to file.
+    """
+    os.makedirs(DEBRIS_STATE_DIR, exist_ok=True)
+    state_file = os.path.join(
+        DEBRIS_STATE_DIR, f"debris_state_{base_lat}_{base_lon}.json"
+    )
+
+    state_data = {
+        "debris_matrix": debris_matrix,
+        "last_updated": timestamp,
+        "base_coordinates": {"latitude": base_lat, "longitude": base_lon},
+    }
+
+    try:
+        with open(state_file, "w") as f:
+            json.dump(state_data, f, indent=2)
+        print(f"Debris state matrix saved for coordinates ({base_lat}, {base_lon})")
+    except Exception as e:
+        print(f"Error saving debris state matrix: {e}")
+
+
 def process_satellite_timestamp(
-    timestamp: str, base_lat: float = None, base_lon: float = None
+    timestamp: str,
+    base_lat: float = None,
+    base_lon: float = None,
+    is_initial_timestamp: bool = False,
 ) -> Dict[str, Any]:
     """
     Process all 16 satellite images for a given timestamp using existing inference modules.
@@ -105,6 +162,10 @@ def process_satellite_timestamp(
     try:
         # Generate satellite coordinates for 4x4 grid using provided base coordinates
         coordinates = generate_satellite_coordinates(base_lat, base_lon)
+
+        # Load previous debris state matrix (returns all False if first time)
+        previous_debris_matrix = load_debris_state_matrix(base_lat, base_lon)
+        current_debris_matrix = [[False for _ in range(4)] for _ in range(4)]
 
         # Create output directories for processed images - structure: images/processed/timestamp/(ship|debris)
         processed_timestamp_dir = os.path.join("images", "processed", timestamp)
@@ -170,6 +231,10 @@ def process_satellite_timestamp(
                 debris_annotated_img = Image.open(debris_files[i])
                 debris_detections = {"has_detections": False, "detection_count": 0}
 
+            # Update current debris matrix (convert patch index to row/col)
+            row, col = divmod(i, 4)
+            current_debris_matrix[row][col] = debris_detections["has_detections"]
+
             # Save processed images with lat/lon filenames
             ship_filename = f"{lat}_{lon}.jpg"
             debris_filename = f"{lat}_{lon}.jpg"
@@ -179,6 +244,22 @@ def process_satellite_timestamp(
 
             ship_annotated_img.save(ship_output_path, "JPEG", quality=90)
             debris_annotated_img.save(debris_output_path, "JPEG", quality=90)
+
+            # Check for alerts (only if not initial timestamp)
+            is_alert = False
+            if not is_initial_timestamp:
+                # Check if debris existed in previous state
+                debris_existed_before = previous_debris_matrix[row][col]
+                current_has_debris = debris_detections["has_detections"]
+                current_has_ship = ship_detections["has_detections"]
+
+                # Alert if: ship detected AND debris detected AND debris didn't exist before
+                if (
+                    current_has_ship
+                    and current_has_debris
+                    and not debris_existed_before
+                ):
+                    is_alert = True
 
             # Create patch data (matching original format)
             patch_info = {
@@ -190,8 +271,7 @@ def process_satellite_timestamp(
                 "detections": {
                     "ship": ship_detections,
                     "debris": debris_detections,
-                    "is_alert": ship_detections["has_detections"]
-                    and debris_detections["has_detections"],
+                    "is_alert": is_alert,
                 },
                 "processed_images": {
                     "ship": ship_output_path,
@@ -199,16 +279,23 @@ def process_satellite_timestamp(
                 },
             }
 
-            patch_data.append(patch_info)
-
-            # Check for alerts (both ship and debris detected) - match original format
-            if patch_info["detections"]["is_alert"]:
+            # Add to alerts list if this patch triggered an alert
+            if is_alert:
                 alerts.append(
                     {
                         "patch_id": coord_info["patch_id"],
                         "coordinates": patch_info["coordinates"],
                     }
                 )
+
+            patch_data.append(patch_info)
+
+        # Print initial timestamp message if applicable
+        if is_initial_timestamp:
+            print("Initial timestamp (t=0): Saving baseline debris state matrix")
+
+        # Always save the current debris state matrix for next timestamp
+        save_debris_state_matrix(base_lat, base_lon, current_debris_matrix, timestamp)
 
         # Calculate processing time
         processing_time = time.time() - start_time
@@ -225,20 +312,25 @@ def process_satellite_timestamp(
         print(f"Processing completed in {processing_time:.2f} seconds")
         print(f"Ship detections: {total_ship_detections}/16 patches")
         print(f"Debris detections: {total_debris_detections}/16 patches")
-        print(f"Alerts (both detected): {total_alerts}/16 patches")
+
+        if is_initial_timestamp:
+            print("Initial timestamp: No alerts generated")
+        else:
+            print(f"Alerts (ship + new debris): {total_alerts}/16 patches")
 
         # Force garbage collection to free memory
         gc.collect()
 
-        if alerts:
+        # Send email only if there are alerts (and not initial timestamp)
+        if alerts and not is_initial_timestamp:
             send_detection_report_email(timestamp, patch_data, alerts)
 
-        return {
+        result = {
             "timestamp": timestamp,
             "processing_time": processing_time,
             "base_coordinates": {
-                "latitude": base_lat or BASE_LAT,
-                "longitude": base_lon or BASE_LON,
+                "latitude": base_lat,
+                "longitude": base_lon,
             },
             "grid_config": {"size": "4x4", "lat_step": LAT_STEP, "lon_step": LON_STEP},
             "patches": patch_data,
@@ -251,19 +343,22 @@ def process_satellite_timestamp(
             },
         }
 
+        return result
+
     except Exception as e:
         print(f"Error during processing: {str(e)}")
         # Force garbage collection on error too
         gc.collect()
         raise
+
+
 # --- Email Reporting Function ---
 
 
 def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     """
-    Sends a single email to jainprinci00@gmail.com with one ZIP file attached
-    containing all ship and debris annotated images for alert patches.
-    Includes HTML summary of coordinates and patch IDs.
+    Sends a single email with one ZIP file attached containing all ship and debris
+    annotated images for alert patches. Includes HTML summary of coordinates and patch IDs.
     """
     recipient = "jainprinci00@gmail.com"
 
@@ -275,9 +370,9 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     html_body = f"""
     <html>
     <body>
-        <h2>Marine Alert Report</h2>
+        <h2>Marine Alert Report - New Debris Detected</h2>
         <p>Timestamp: <b>{timestamp}</b></p>
-        <p>The following patches show both ship and debris detections:</p>
+        <p>The following patches show ship detections with new debris:</p>
         <table border="1" cellspacing="0" cellpadding="5">
             <tr>
                 <th>Patch ID</th>
@@ -289,9 +384,9 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     for alert in alerts:
         html_body += f"""
             <tr>
-                <td>{alert['patch_id']}</td>
-                <td>{alert['coordinates']['latitude']}</td>
-                <td>{alert['coordinates']['longitude']}</td>
+                <td>{alert["patch_id"]}</td>
+                <td>{alert["coordinates"]["latitude"]}</td>
+                <td>{alert["coordinates"]["longitude"]}</td>
             </tr>
         """
 
@@ -325,7 +420,7 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     zip_buffer.seek(0)
 
     # Send email
-    subject = f"[Marine Alert] Ship + Debris Detections ({timestamp})"
+    subject = f"[Marine Alert] New Debris + Ship Detections ({timestamp})"
     try:
         send_mail_with_attachment(
             subject=subject,
