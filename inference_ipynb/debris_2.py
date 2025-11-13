@@ -36,13 +36,13 @@ def _preprocess(pil_img: Image.Image, target_size: Tuple[int, int] = IMAGE_SIZE)
     orig_w, orig_h = pil_img.size
     resized = pil_img.resize(target_size)
     # produce channels-first (C, H, W) and add batch dim -> (1, C, H, W)
-    image_np = np.array(resized).astype(np.float32) / 255.0
+    image_np = np.array(resized).astype(np.float16) / 255.0  # changed from float32 to float16
     # If image_np shape is (H, W, C) -> transpose to C,H,W
     if image_np.ndim == 3:
         image_chw = image_np.transpose(2, 0, 1)
     else:
         raise ValueError("Unexpected image array shape during preprocess.")
-    image_np_batched = np.expand_dims(image_chw, axis=0).astype(np.float32)
+    image_np_batched = np.expand_dims(image_chw, axis=0).astype(np.float16)  # changed from float32 to float16
     return image_np_batched, (orig_h, orig_w)
 
 

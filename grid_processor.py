@@ -14,6 +14,7 @@ import zipfile
 # Import the inference modules
 from inference import ship
 from inference import debris
+from inference import distance
 
 # --- Configuration ---
 # Satellite coordinate configuration
@@ -171,6 +172,8 @@ def process_satellite_timestamp(
         processed_timestamp_dir = os.path.join("images", "processed", timestamp)
         processed_ship_dir = os.path.join(processed_timestamp_dir, "ship")
         processed_debris_dir = os.path.join(processed_timestamp_dir, "debris")
+        processed_distance_dir = os.path.join(processed_timestamp_dir, "distance")
+        os.makedirs(processed_distance_dir, exist_ok=True)
         os.makedirs(processed_ship_dir, exist_ok=True)
         os.makedirs(processed_debris_dir, exist_ok=True)
 
@@ -230,6 +233,27 @@ def process_satellite_timestamp(
                 # Fallback to original image
                 debris_annotated_img = Image.open(debris_files[i])
                 debris_detections = {"has_detections": False, "detection_count": 0}
+            
+            # distance Detection using combined inference module
+            try:
+                debris_original_img = Image.open(debris_files[i])
+                ship_original_img = Image.open(ship_files[i])
+                # avoid shadowing the `distance` module: use `min_distance` for the returned value
+                min_distance, distance_annotated_img = distance.detect_distance(
+                    ship_original_img, debris_original_img, ship_model_path, debris_model_path
+                )
+                # Extract detection info from actual results - match original format
+                distance_detections = {"has_detections": (min_distance < 200)}
+
+            except Exception as e:
+                print(f"distance processing failed for patch {i}: {e}")
+                # ensure values exist even on failure
+                try:
+                    distance_annotated_img = Image.open(ship_files[i])
+                except Exception:
+                    distance_annotated_img = Image.new("RGB", (512, 512), (0, 0, 0))
+                min_distance = float("inf")
+                distance_detections = {"has_detections": False}
 
             # Update current debris matrix (convert patch index to row/col)
             row, col = divmod(i, 4)
@@ -238,12 +262,16 @@ def process_satellite_timestamp(
             # Save processed images with lat/lon filenames
             ship_filename = f"{lat}_{lon}.jpg"
             debris_filename = f"{lat}_{lon}.jpg"
+            distance_filename = f"{lat}_{lon}.jpg"
+
 
             ship_output_path = os.path.join(processed_ship_dir, ship_filename)
             debris_output_path = os.path.join(processed_debris_dir, debris_filename)
+            distance_output_path = os.path.join(processed_distance_dir, distance_filename)
 
             ship_annotated_img.save(ship_output_path, "JPEG", quality=90)
             debris_annotated_img.save(debris_output_path, "JPEG", quality=90)
+            distance_annotated_img.save(distance_output_path, "JPEG", quality=90)
 
             # Check for alerts (only if not initial timestamp)
             is_alert = False
@@ -252,12 +280,15 @@ def process_satellite_timestamp(
                 debris_existed_before = previous_debris_matrix[row][col]
                 current_has_debris = debris_detections["has_detections"]
                 current_has_ship = ship_detections["has_detections"]
+                current_has_min_distance = distance_detections["has_detections"]<=200
+
 
                 # Alert if: ship detected AND debris detected AND debris didn't exist before
                 if (
                     current_has_ship
                     and current_has_debris
-                    and not debris_existed_before
+                    and not debris_existed_before 
+                    and current_has_min_distance
                 ):
                     is_alert = True
 
@@ -284,7 +315,6 @@ def process_satellite_timestamp(
                 alerts.append(
                     {
                         "patch_id": coord_info["patch_id"],
-                        "coordinates": patch_info["coordinates"],
                     }
                 )
 
@@ -407,7 +437,7 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
             if not patch_info:
                 continue
 
-            for label in ["ship", "debris"]:
+            for label in ["ship", "debris", "distance"]:
                 img_path = patch_info["processed_images"][label]
                 if not os.path.exists(img_path):
                     continue
