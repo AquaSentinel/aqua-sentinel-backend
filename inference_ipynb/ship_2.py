@@ -57,12 +57,12 @@ def _letterbox(im, new_shape=640, color=(114, 114, 114)):
 def _preprocess_pil(pil_img: Image.Image, target_size: int = TARGET_SIZE):
     """Prepare image for ONNX inference."""
     img = np.array(pil_img.convert("RGB"))[:, :, ::-1]  # RGB->BGR
-    img, r, (dw, dh) = _letterbox(img, target_size)
+    img, r, pad = _letterbox(img, target_size)
     img = img.transpose(2, 0, 1)
     img = np.expand_dims(img, 0)
-    img = np.ascontiguousarray(img, dtype=np.float32)
+    img = np.ascontiguousarray(img, dtype=np.float16)  # changed from float32 to float16
     img /= 255.0
-    return img, r, (dw, dh), pil_img.size
+    return img, r, pad, pil_img.size
 
 
 def _non_max_suppression(prediction, conf_thres=0.4, iou_thres=0.45):
