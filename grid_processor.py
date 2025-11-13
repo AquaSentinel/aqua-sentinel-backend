@@ -243,7 +243,7 @@ def process_satellite_timestamp(
                     ship_original_img, debris_original_img, ship_model_path, debris_model_path
                 )
                 # Extract detection info from actual results - match original format
-                distance_detections = {"has_detections": (min_distance < 200)}
+                distance_detections = {"has_detections": (min_distance <= 200)}
 
             except Exception as e:
                 print(f"distance processing failed for patch {i}: {e}")
@@ -280,7 +280,7 @@ def process_satellite_timestamp(
                 debris_existed_before = previous_debris_matrix[row][col]
                 current_has_debris = debris_detections["has_detections"]
                 current_has_ship = ship_detections["has_detections"]
-                current_has_min_distance = distance_detections["has_detections"]<=200
+                current_has_min_distance = distance_detections["has_detections"]
 
 
                 # Alert if: ship detected AND debris detected AND debris didn't exist before
@@ -302,11 +302,13 @@ def process_satellite_timestamp(
                 "detections": {
                     "ship": ship_detections,
                     "debris": debris_detections,
+                    "distance": distance_detections,
                     "is_alert": is_alert,
                 },
                 "processed_images": {
                     "ship": ship_output_path,
                     "debris": debris_output_path,
+                    "distance": distance_output_path,
                 },
             }
 
@@ -315,6 +317,7 @@ def process_satellite_timestamp(
                 alerts.append(
                     {
                         "patch_id": coord_info["patch_id"],
+                        "coordinates": patch_info["coordinates"],
                     }
                 )
 
@@ -450,7 +453,7 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     zip_buffer.seek(0)
 
     # Send email
-    subject = f"[Marine Alert] New Debris + Ship Detections ({timestamp})"
+    subject = f"[Marine Alert] New Debris + Ship Detections + Distance ({timestamp})"
     try:
         send_mail_with_attachment(
             subject=subject,

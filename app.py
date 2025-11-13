@@ -359,10 +359,10 @@ def process_timestamp_route(timestamp):
 def serve_single_grid_image(timestamp, model_type, lat, lon):
     """Serve a single image from the 4x4 grid using lat/lon coordinates."""
     try:
-        if model_type not in ["ship", "debris"]:
+        if model_type not in ["ship", "debris","distance"]:
             return jsonify({"error": "Invalid model type"}), 400
 
-        # Define the processed image directory path - structure: images/processed/timestamp/(ship|debris)
+        # Define the processed image directory path - structure: images/processed/timestamp/(ship|debris|distance)/
         processed_dir = os.path.join("images", "processed", timestamp, model_type)
 
         if not os.path.exists(processed_dir):
