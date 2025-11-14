@@ -135,9 +135,86 @@ def detect_distance(
         return float("inf"), ship_pil.convert("RGB")
 
 
+def calculate_distance_from_annotated(
+    ship_annotated_pil: Image.Image,
+    debris_annotated_pil: Image.Image,
+) -> Tuple[float, Image.Image]:
+    """
+    Computes pairwise distances between ships and debris using pre-processed annotated images.
+    This avoids re-running the inference models and directly uses the annotated images.
+
+    Args:
+        ship_annotated_pil: PIL Image with ship detections already drawn (blue boxes)
+        debris_annotated_pil: PIL Image with debris detections already drawn (red boxes)
+
+    Returns:
+        Tuple of (min_distance_in_pixels, combined_annotated_PIL_image)
+    """
+    try:
+        ship_cv = cv2.cvtColor(np.array(ship_annotated_pil), cv2.COLOR_RGB2BGR)
+        debris_cv = cv2.cvtColor(np.array(debris_annotated_pil), cv2.COLOR_RGB2BGR)
+
+        sh_h, sh_w = ship_cv.shape[:2]
+        db_h, db_w = debris_cv.shape[:2]
+        debris_resized = cv2.resize(
+            debris_cv, (sh_w, sh_h), interpolation=cv2.INTER_LINEAR
+        )
+
+        ship_boxes = _detect_color_boxes(ship_cv, "blue")
+        debris_boxes = _detect_color_boxes(debris_resized, "red")
+        ship_centers = _centers(ship_boxes)
+        debris_centers = _centers(debris_boxes)
+
+        pairs = []
+        for i, s in enumerate(ship_centers):
+            for j, d in enumerate(debris_centers):
+                pairs.append(((i, j), math.dist(s, d)))
+
+        min_dist = float("inf")
+        if pairs:
+            _, min_dist = min(pairs, key=lambda x: x[1])
+
+        combined = cv2.addWeighted(ship_cv, 0.6, debris_resized, 0.6, 0)
+
+        YELLOW = (0, 255, 255)
+        for box in ship_boxes:
+            x1, y1, x2, y2 = box
+            cv2.rectangle(combined, (x1, y1), (x2, y2), YELLOW, 3)
+
+        GRAY = (180, 180, 180)
+        min_pair = None
+        if pairs:
+            min_pair = min(pairs, key=lambda x: x[1])[0]
+        for i_j, dist in pairs:
+            i, j = i_j
+            c1, c2 = ship_centers[i], debris_centers[j]
+            color = GREEN if i_j == min_pair else GRAY
+            cv2.line(combined, c1, c2, color, 2)
+            mid = ((c1[0] + c2[0]) // 2, (c1[1] + c2[1]) // 2)
+            if i_j == min_pair:
+                cv2.putText(
+                    combined,
+                    f"{dist:.1f}",
+                    mid,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    GREEN,
+                    2,
+                    cv2.LINE_AA,
+                )
+
+        annotated = Image.fromarray(cv2.cvtColor(combined, cv2.COLOR_BGR2RGB))
+        return min_dist, annotated
+
+    except Exception as e:
+        print(f"❌ distance calculation error: {e}")
+        return float("inf"), ship_annotated_pil.convert("RGB")
+
+
 def _pil_to_bytes(pil_img: Image.Image) -> bytes:
     """Utility: convert PIL image to PNG bytes."""
     import io
+
     buf = io.BytesIO()
     pil_img.save(buf, format="PNG")
     return buf.getvalue()

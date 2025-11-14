@@ -233,23 +233,19 @@ def process_satellite_timestamp(
                 # Fallback to original image
                 debris_annotated_img = Image.open(debris_files[i])
                 debris_detections = {"has_detections": False, "detection_count": 0}
-            
-            # distance Detection using combined inference module
+
             try:
-                debris_original_img = Image.open(debris_files[i])
-                ship_original_img = Image.open(ship_files[i])
-                # avoid shadowing the `distance` module: use `min_distance` for the returned value
-                min_distance, distance_annotated_img = distance.detect_distance(
-                    ship_original_img, debris_original_img, ship_model_path, debris_model_path
+                min_distance, distance_annotated_img = (
+                    distance.calculate_distance_from_annotated(
+                        ship_annotated_img, debris_annotated_img
+                    )
                 )
-                # Extract detection info from actual results - match original format
                 distance_detections = {"has_detections": (min_distance <= 200)}
 
             except Exception as e:
                 print(f"distance processing failed for patch {i}: {e}")
-                # ensure values exist even on failure
                 try:
-                    distance_annotated_img = Image.open(ship_files[i])
+                    distance_annotated_img = ship_annotated_img.copy()
                 except Exception:
                     distance_annotated_img = Image.new("RGB", (512, 512), (0, 0, 0))
                 min_distance = float("inf")
@@ -282,12 +278,11 @@ def process_satellite_timestamp(
                 current_has_ship = ship_detections["has_detections"]
                 current_has_min_distance = distance_detections["has_detections"]
 
-
                 # Alert if: ship detected AND debris detected AND debris didn't exist before
                 if (
                     current_has_ship
                     and current_has_debris
-                    and not debris_existed_before 
+                    and not debris_existed_before
                     and current_has_min_distance
                 ):
                     is_alert = True
