@@ -388,7 +388,7 @@ def send_detection_report_email(timestamp: str, patch_data: list, alerts: list):
     Sends a single email with one ZIP file attached containing all ship and debris
     annotated images for alert patches. Includes HTML summary of coordinates and patch IDs.
     """
-    recipient = "jainprinci00@gmail.com"
+    recipient = os.getenv("RECIPIENT_EMAIL")
 
     if not alerts:
         print("No alerts found — no email sent.")
