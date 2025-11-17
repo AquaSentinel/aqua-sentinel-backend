@@ -233,16 +233,10 @@ def draw_detections(
     color: str = "red",
 ) -> Image.Image:
     """Draw bounding boxes on image efficiently."""
-    from PIL import ImageDraw, ImageFont
+    from PIL import ImageDraw
 
     img_copy = pil_img.copy()
     draw = ImageDraw.Draw(img_copy)
-
-    # Try to load a font, fallback to default
-    try:
-        font = ImageFont.truetype("arial.ttf", size=14)
-    except Exception:
-        font = ImageFont.load_default()
 
     for i, box in enumerate(boxes):
         if len(box) >= 4:
@@ -252,15 +246,6 @@ def draw_detections(
 
         # Draw rectangle
         draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
-
-        # Only draw class name without confidence score
-        text = class_name
-
-        # Draw text with background
-        text_pos = (int(x1), max(0, int(y1) - 16))
-        text_bbox = draw.textbbox(text_pos, text, font=font)
-        draw.rectangle(text_bbox, fill=color)
-        draw.text(text_pos, text, fill="white", font=font)
 
     return img_copy
 
