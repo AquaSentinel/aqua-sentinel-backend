@@ -66,4 +66,3 @@ unzip detections.zip
       - ship_output.jpg
       - debris_output.jpg
 """
-
