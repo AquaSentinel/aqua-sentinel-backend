@@ -47,3 +47,8 @@ inference-ipynb/
 training
 backup.py
 README.md 
+
+
+# Ignore images/processed
+images/processed
+debris_state
