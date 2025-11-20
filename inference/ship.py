@@ -63,6 +63,6 @@ def detect_ships(
     scores = [box[4] for box in boxes] if boxes else []
 
     # Draw annotations
-    annotated_img = draw_detections(pil_img, boxes, scores, "ship", "blue")
+    annotated_img = draw_detections(pil_img, boxes, scores, "ship", "yellow")
 
     return boxes, annotated_img

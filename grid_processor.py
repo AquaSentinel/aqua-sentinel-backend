@@ -55,7 +55,7 @@ def generate_satellite_coordinates(base_lat=None, base_lon=None):
         lat = top_left_lat - (row * LAT_STEP)  # Subtract to go south as row increases
         lon = top_left_lon + (col * LON_STEP)  # Add to go east as col increases
         coordinates.append(
-            {
+            { 
                 "patch_id": f"P{i + 1:02d}",
                 "latitude": round(lat, 6),
                 "longitude": round(lon, 6),
@@ -240,7 +240,9 @@ def process_satellite_timestamp(
                         ship_annotated_img, debris_annotated_img
                     )
                 )
-                distance_detections = {"has_detections": (min_distance <= 200)}
+                threshold_distance = 100  # meters
+                # Extract detection info from actual results - match original format
+                distance_detections = {"has_detections": (min_distance <= threshold_distance)}  # within 100 meters
 
             except Exception as e:
                 print(f"distance processing failed for patch {i}: {e}")

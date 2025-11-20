@@ -11,21 +11,23 @@ from typing import List, Tuple
 from PIL import Image
 
 # --- Constants ---
-BLUE = "blue"
+# BLUE = "blue"
 RED = "red"
 GREEN = (0, 255, 0)
 
 
 def _detect_color_boxes(img_bgr: np.ndarray, color: str, min_area: int = 120) -> List[Tuple[int, int, int, int]]:
     """
-    Detects rectangles drawn in BLUE (ships) or RED (debris).
+    Detects rectangles drawn in Yellow (ships) or RED (debris).
     Uses HSV masking and morphological ops to solidify outlines.
     Returns a list of (x1, y1, x2, y2) bounding boxes.
     """
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
 
-    if color == "blue":
-        lower, upper = (90, 40, 40), (135, 255, 255)
+    if color == "yellow":
+        # OpenCV HSV ranges: H ∈ [0,179], S,V ∈ [0,255]
+        # Typical yellow ≈ H 20–38 with good saturation/value
+        lower, upper = (18, 100, 100), (38, 255, 255)
         mask = cv2.inRange(hsv, lower, upper)
     else:
         lower1, upper1 = (0, 70, 70), (12, 255, 255)
@@ -75,7 +77,7 @@ def calculate_distance_from_annotated(
             debris_cv, (sh_w, sh_h), interpolation=cv2.INTER_LINEAR
         )
 
-        ship_boxes = _detect_color_boxes(ship_cv, "blue")
+        ship_boxes = _detect_color_boxes(ship_cv, "yellow")
         debris_boxes = _detect_color_boxes(debris_resized, "red")
         ship_centers = _centers(ship_boxes)
         debris_centers = _centers(debris_boxes)
@@ -91,10 +93,10 @@ def calculate_distance_from_annotated(
 
         combined = cv2.addWeighted(ship_cv, 0.6, debris_resized, 0.6, 0)
 
-        YELLOW = (0, 255, 255)
-        for box in ship_boxes:
-            x1, y1, x2, y2 = box
-            cv2.rectangle(combined, (x1, y1), (x2, y2), YELLOW, 3)
+        # YELLOW = (0, 255, 255)
+        # for box in ship_boxes:
+        #     x1, y1, x2, y2 = box
+        #     cv2.rectangle(combined, (x1, y1), (x2, y2), YELLOW, 3)
 
         GRAY = (180, 180, 180)
         min_pair = None
