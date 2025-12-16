@@ -4,12 +4,13 @@ import gc
 import glob
 import time
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
 from PIL import Image
 from tqdm import tqdm
 from utils.email_utils import send_mail_with_attachment
 import io
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import the inference modules
 from inference import ship
@@ -114,6 +115,155 @@ def save_debris_state_matrix(
         print(f"Error saving debris state matrix: {e}")
 
 
+def process_single_patch(
+    i: int,
+    coord_info: Dict[str, Any],
+    ship_file: str,
+    debris_file: str,
+    ship_model_path: str,
+    debris_model_path: str,
+    processed_ship_dir: str,
+    processed_debris_dir: str,
+    processed_distance_dir: str,
+    previous_debris_matrix: List[List[bool]],
+    is_initial_timestamp: bool
+) -> Dict[str, Any]:
+    """Process a single patch: detection, image saving, and alert checking."""
+    
+    lat = coord_info["latitude"]
+    lon = coord_info["longitude"]
+
+    # Ship Processing using inference module
+    try:
+        # Load image as PIL for ship inference
+        ship_original_img = Image.open(ship_file)
+
+        # Use the optimized detection function that returns actual detection data
+        ship_boxes, ship_annotated_img = ship.detect_ships(
+            ship_original_img, ship_model_path
+        )
+
+        # Extract detection info from actual results - match original format
+        ship_detections = {
+            "has_detections": len(ship_boxes) > 0,
+            "detection_count": len(ship_boxes),
+        }
+
+    except Exception as e:
+        print(f"Ship processing failed for patch {i}: {e}")
+        # Fallback to original image
+        ship_annotated_img = Image.open(ship_file)
+        ship_detections = {"has_detections": False, "detection_count": 0}
+
+    # Debris Processing using inference module
+    try:
+        # Load image as PIL for debris inference
+        debris_original_img = Image.open(debris_file)
+
+        # Use the optimized detection function that returns actual detection data
+        debris_boxes, debris_annotated_img = debris.detect_debris(
+            debris_original_img, debris_model_path
+        )
+
+        # Extract detection info from actual results - match original format
+        debris_detections = {
+            "has_detections": len(debris_boxes) > 0,
+            "detection_count": len(debris_boxes),
+        }
+
+    except Exception as e:
+        print(f"Debris processing failed for patch {i}: {e}")
+        # Fallback to original image
+        debris_annotated_img = Image.open(debris_file)
+        debris_detections = {"has_detections": False, "detection_count": 0}
+
+    try:
+        min_distance, distance_annotated_img = (
+            distance.calculate_distance_from_annotated(
+                ship_annotated_img, debris_annotated_img
+            )
+        )
+        threshold_distance = 100  # meters
+        # Extract detection info from actual results - match original format
+        distance_detections = {"has_detections": (min_distance <= threshold_distance)}  # within 100 meters
+
+    except Exception as e:
+        print(f"distance processing failed for patch {i}: {e}")
+        try:
+            distance_annotated_img = ship_annotated_img.copy()
+        except Exception:
+            distance_annotated_img = Image.new("RGB", (512, 512), (0, 0, 0))
+        distance_detections = {"has_detections": False}
+
+    # Save processed images with lat/lon filenames
+    ship_filename = f"{lat}_{lon}.jpg"
+    debris_filename = f"{lat}_{lon}.jpg"
+    distance_filename = f"{lat}_{lon}.jpg"
+
+    ship_output_path = os.path.join(processed_ship_dir, ship_filename)
+    debris_output_path = os.path.join(processed_debris_dir, debris_filename)
+    distance_output_path = os.path.join(processed_distance_dir, distance_filename)
+
+    ship_annotated_img.save(ship_output_path, "JPEG", quality=90)
+    debris_annotated_img.save(debris_output_path, "JPEG", quality=90)
+    distance_annotated_img.save(distance_output_path, "JPEG", quality=90)
+
+    # Check for alerts (only if not initial timestamp)
+    row, col = divmod(i, 4)
+    is_alert = False
+    if not is_initial_timestamp:
+        # Check if debris existed in previous state
+        debris_existed_before = previous_debris_matrix[row][col]
+        current_has_debris = debris_detections["has_detections"]
+        current_has_ship = ship_detections["has_detections"]
+        current_has_min_distance = distance_detections["has_detections"]
+
+        # Alert if: ship detected AND debris detected AND debris didn't exist before
+        if (
+            current_has_ship
+            and current_has_debris
+            and not debris_existed_before
+            and current_has_min_distance
+        ):
+            is_alert = True
+
+    # Create patch data (matching original format)
+    patch_info = {
+        "patch_id": coord_info["patch_id"],
+        "coordinates": {
+            "latitude": coord_info["latitude"],
+            "longitude": coord_info["longitude"],
+        },
+        "detections": {
+            "ship": ship_detections,
+            "debris": debris_detections,
+            "distance": distance_detections,
+            "is_alert": is_alert,
+        },
+        "processed_images": {
+            "ship": ship_output_path,
+            "debris": debris_output_path,
+            "distance": distance_output_path,
+        },
+    }
+
+    alert_entry = None
+    if is_alert:
+        alert_entry = {
+            "patch_id": coord_info["patch_id"],
+            "coordinates": patch_info["coordinates"],
+        }
+    
+    return {
+        "patch_info": patch_info,
+        "is_alert": is_alert,
+        "alert_entry": alert_entry,
+        "row": row,
+        "col": col,
+        "debris_detected": debris_detections["has_detections"]
+    }
+
+
 def process_satellite_timestamp(
     timestamp: str,
     base_lat: float = None,
@@ -183,142 +333,49 @@ def process_satellite_timestamp(
         # Model paths - use the same paths as the main API
         ship_model_path = os.path.join("models", "ship_detection.onnx")
         debris_model_path = os.path.join("models", "marine_debris_detector.onnx")
-
+        
         # Process patches with progress bar
-        for i in tqdm(range(16), desc="Processing patches", unit="patch"):
-            coord_info = coordinates[i]
-            lat = coord_info["latitude"]
-            lon = coord_info["longitude"]
+        # Process patches using ThreadPoolExecutor for parallel processing
+        max_workers = min(16, (os.cpu_count() or 1) * 2 + 2) # Adjust workers based on CPU
+        print(f"Starting parallel processing with {max_workers} workers")
 
-            # Ship Processing using inference module
-            try:
-                # Load image as PIL for ship inference
-                ship_original_img = Image.open(ship_files[i])
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for i in range(16):
+                futures.append(executor.submit(
+                    process_single_patch,
+                    i=i,
+                    coord_info=coordinates[i],
+                    ship_file=ship_files[i],
+                    debris_file=debris_files[i],
+                    ship_model_path=ship_model_path,
+                    debris_model_path=debris_model_path,
+                    processed_ship_dir=processed_ship_dir,
+                    processed_debris_dir=processed_debris_dir,
+                    processed_distance_dir=processed_distance_dir,
+                    previous_debris_matrix=previous_debris_matrix,
+                    is_initial_timestamp=is_initial_timestamp
+                ))
 
-                # Use the optimized detection function that returns actual detection data
-                ship_boxes, ship_annotated_img = ship.detect_ships(
-                    ship_original_img, ship_model_path
-                )
-
-                # Extract detection info from actual results - match original format
-                ship_detections = {
-                    "has_detections": len(ship_boxes) > 0,
-                    "detection_count": len(ship_boxes),
-                }
-
-            except Exception as e:
-                print(f"Ship processing failed for patch {i}: {e}")
-                # Fallback to original image
-                ship_annotated_img = Image.open(ship_files[i])
-                ship_detections = {"has_detections": False, "detection_count": 0}
-
-            # Debris Processing using inference module
-            try:
-                # Load image as PIL for debris inference
-                debris_original_img = Image.open(debris_files[i])
-
-                # Use the optimized detection function that returns actual detection data
-                debris_boxes, debris_annotated_img = debris.detect_debris(
-                    debris_original_img, debris_model_path
-                )
-
-                # Extract detection info from actual results - match original format
-                debris_detections = {
-                    "has_detections": len(debris_boxes) > 0,
-                    "detection_count": len(debris_boxes),
-                }
-
-            except Exception as e:
-                print(f"Debris processing failed for patch {i}: {e}")
-                # Fallback to original image
-                debris_annotated_img = Image.open(debris_files[i])
-                debris_detections = {"has_detections": False, "detection_count": 0}
-
-            try:
-                min_distance, distance_annotated_img = (
-                    distance.calculate_distance_from_annotated(
-                        ship_annotated_img, debris_annotated_img
-                    )
-                )
-                threshold_distance = 100  # meters
-                # Extract detection info from actual results - match original format
-                distance_detections = {"has_detections": (min_distance <= threshold_distance)}  # within 100 meters
-
-            except Exception as e:
-                print(f"distance processing failed for patch {i}: {e}")
+            # Collect results as they complete
+            for future in tqdm(as_completed(futures), total=16, desc="Processing patches", unit="patch"):
                 try:
-                    distance_annotated_img = ship_annotated_img.copy()
-                except Exception:
-                    distance_annotated_img = Image.new("RGB", (512, 512), (0, 0, 0))
-                min_distance = float("inf")
-                distance_detections = {"has_detections": False}
+                    res = future.result()
+                    
+                    # Collect data
+                    patch_data.append(res["patch_info"])
+                    
+                    if res["alert_entry"]:
+                        alerts.append(res["alert_entry"])
+                    
+                    # Update current debris matrix
+                    current_debris_matrix[res["row"]][res["col"]] = res["debris_detected"]
+                    
+                except Exception as e:
+                    print(f"Error processing patch task: {e}")
 
-            # Update current debris matrix (convert patch index to row/col)
-            row, col = divmod(i, 4)
-            current_debris_matrix[row][col] = debris_detections["has_detections"]
-
-            # Save processed images with lat/lon filenames
-            ship_filename = f"{lat}_{lon}.jpg"
-            debris_filename = f"{lat}_{lon}.jpg"
-            distance_filename = f"{lat}_{lon}.jpg"
-
-
-            ship_output_path = os.path.join(processed_ship_dir, ship_filename)
-            debris_output_path = os.path.join(processed_debris_dir, debris_filename)
-            distance_output_path = os.path.join(processed_distance_dir, distance_filename)
-
-            ship_annotated_img.save(ship_output_path, "JPEG", quality=90)
-            debris_annotated_img.save(debris_output_path, "JPEG", quality=90)
-            distance_annotated_img.save(distance_output_path, "JPEG", quality=90)
-
-            # Check for alerts (only if not initial timestamp)
-            is_alert = False
-            if not is_initial_timestamp:
-                # Check if debris existed in previous state
-                debris_existed_before = previous_debris_matrix[row][col]
-                current_has_debris = debris_detections["has_detections"]
-                current_has_ship = ship_detections["has_detections"]
-                current_has_min_distance = distance_detections["has_detections"]
-
-                # Alert if: ship detected AND debris detected AND debris didn't exist before
-                if (
-                    current_has_ship
-                    and current_has_debris
-                    and not debris_existed_before
-                    and current_has_min_distance
-                ):
-                    is_alert = True
-
-            # Create patch data (matching original format)
-            patch_info = {
-                "patch_id": coord_info["patch_id"],
-                "coordinates": {
-                    "latitude": coord_info["latitude"],
-                    "longitude": coord_info["longitude"],
-                },
-                "detections": {
-                    "ship": ship_detections,
-                    "debris": debris_detections,
-                    "distance": distance_detections,
-                    "is_alert": is_alert,
-                },
-                "processed_images": {
-                    "ship": ship_output_path,
-                    "debris": debris_output_path,
-                    "distance": distance_output_path,
-                },
-            }
-
-            # Add to alerts list if this patch triggered an alert
-            if is_alert:
-                alerts.append(
-                    {
-                        "patch_id": coord_info["patch_id"],
-                        "coordinates": patch_info["coordinates"],
-                    }
-                )
-
-            patch_data.append(patch_info)
+        # Sort patch_data by patch_id to ensure consistent order
+        patch_data.sort(key=lambda x: x["patch_id"])
 
         # Print initial timestamp message if applicable
         if is_initial_timestamp:
